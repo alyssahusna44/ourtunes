@@ -1,6 +1,6 @@
 # ourtunes
 
-A new Flutter project.
+A Flutter project. IDK man. I'm trying to make a music player here.
 
 ## Getting Started
 

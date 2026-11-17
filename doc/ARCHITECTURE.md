@@ -1,6 +1,6 @@
 # OurTunes Architecture
 
-Status: draft v0.1 (OurTunes)
+Status: draft v0.2 (placeholder app name: OurTunes)
 
 OurTunes is a private Android music app for two people. It plays music already on the phone, lets the two users share playlists, and later adds search and download from legal sources such as the Internet Archive.
 
@@ -28,7 +28,7 @@ OurTunes is a private Android music app for two people. It plays music already o
 | Framework | Flutter (Dart) |
 | State management and DI | Riverpod |
 | Navigation | go_router |
-| Local database | drift (SQLite) |
+| Local database | drift and drift_flutter (SQLite), with drift_dev and build_runner for code generation |
 | Playback | just_audio with just_audio_background (move to audio_service if custom controls are needed) |
 | Permissions | permission_handler |
 | Backend (phase 2) | Supabase: Postgres, Auth, row-level security |
@@ -42,7 +42,7 @@ Package choices should be rechecked on pub.dev for maintenance status before the
 lib/
   main.dart
   app/                  # router, theme, app-wide providers
-  core/                 # database, error types, utilities, shared widgets
+  core/                 # database (tables, migrations), error types, utilities (sort keys), shared widgets
   features/
     library/
       data/             # MediaStore source, DB access, repository implementation
@@ -67,34 +67,61 @@ lib/
 
 ## 6. Data model (local SQLite)
 
-All ids that may be synced are UUIDs generated on the device.
+Id rules:
+
+- **tracks** and **library_folders** use local auto-increment integer ids. Tracks never sync, because each phone has its own files and shared playlists match tracks by metadata (see section 10).
+- **playlists** and **playlist_entries** use UUIDs generated on the device, because they are synced.
 
 **tracks**
-- id (uuid), media_store_id, uri, relative_path, size_bytes, date_modified, duration_ms
+- id (integer, auto-increment), media_store_id (unique), uri, relative_path, size_bytes, date_modified, duration_ms
 - title, artist, album, album_artist, year, track_no (original tags, nullable)
+- title_sort, artist_sort, album_sort (sort keys built from the original tags, nullable)
 - musicbrainz_recording_id (nullable)
 - source (`local` or `internet_archive`), license (nullable)
-- is_missing, created_at, updated_at, deleted_at
+- is_missing, created_at, updated_at
+
+There is no `deleted_at` on tracks. A file that disappears is marked `is_missing`, and tracks are never synced.
 
 **track_edits** (user overrides, one row per edited track)
-- track_id, title, artist, album, year (all nullable)
+- track_id (primary key, references tracks, deleted with its track)
+- title, artist, album, year (all nullable)
+- title_sort, artist_sort, album_sort (sort keys built from the edited values)
 - updated_at
 
-The app displays `COALESCE(edit value, original value)`. Rescans never touch `track_edits`.
+The app displays the edited value when it exists and the original tag otherwise. Rescans never touch `track_edits`. A null edit column means "no override", so an edit cannot blank out a field.
 
 **library_folders** (included folders for the scan)
-- id, relative_path, created_at
+- id (integer, auto-increment), relative_path (unique), created_at
 
-**playlists**
+**playlists** (next step)
 - id (uuid), name, created_at, updated_at, deleted_at
 - owner_user_id (nullable until phase 2)
 
-**playlist_entries**
+**playlist_entries** (next step)
 - id (uuid), playlist_id, position (real number), added_at, updated_at, deleted_at
-- local_track_id (nullable, resolved per device)
+- local_track_id (nullable integer, resolved per device)
 - title, artist, album, duration_ms, musicbrainz_recording_id (snapshot used for matching)
 
 Display rule: store missing values as null and show "Unknown Artist" (or similar) in the UI only.
+
+### Sorting rules
+
+- Sorting uses the sort-key columns, never the raw tags.
+- A sort key is lower case, has whitespace collapsed, and ignores a leading "the", "a" or "an" ("The Beatles" sorts under B). A blank value has no key.
+- The query sorts by `COALESCE(edit sort key, original sort key)`, with missing values last ("Unknown Artist" at the bottom).
+- Whenever a tag or an edit is saved, its sort key is rebuilt with the shared `buildSortKey` function in `core/utils`.
+- Tie-breakers for the artist view: artist, album, track number, title.
+
+### Schema versions and migrations
+
+- The schema starts at version 1.
+- From the first change after that, every schema change bumps the version and adds a migration step, so an installed copy never loses its library.
+- Generated drift files (`*.g.dart`) are committed so CI does not need a code generation step.
+
+### Database tests
+
+- Unit tests run against an in-memory drift database (`NativeDatabase.memory()`), so sorting, edits and rescan logic are tested on a laptop without a phone.
+- The same tests run in GitHub Actions.
 
 ## 7. Library scan and rescan
 
@@ -148,3 +175,7 @@ Display rule: store missing values as null and show "Unknown Artist" (or similar
 | 5 | Shared playlists hold metadata only | Avoids distributing copyrighted audio |
 | 6 | Legal sources only, starting with the Internet Archive | Matches the project's values and avoids terms-of-service violations |
 | 7 | No Play Store release for now | Private APK for two users, store requirements postponed |
+| 8 | Integer ids for tracks, UUIDs for playlists and entries | Tracks never sync, so integers are simpler and faster; only synced data needs UUIDs |
+| 9 | Sort keys built from the start (ignore case and leading articles, missing values last) | Correct ordering from day one; adding it later would need a migration and a backfill |
+| 10 | Schema version 1 with real migrations from the first change | An installed copy keeps its library |
+| 11 | In-memory database tests | Fast, no phone needed, runs in CI |

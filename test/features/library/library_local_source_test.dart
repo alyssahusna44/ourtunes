@@ -1,4 +1,4 @@
-import 'package:drift/drift.dart' show Value;
+//import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -46,16 +46,24 @@ void main() {
     expect(db.schemaVersion, 1);
   });
 
-  test('sorts by artist ignoring case and leading "The", missing last', () async {
-    await add(1, title: 'z', artist: 'Zebra');
-    await add(2, title: 'b', artist: 'the beatles');
-    await add(3, title: 'a', artist: 'Adele');
-    await add(4, title: 'n');
+  test(
+    'sorts by artist ignoring case and leading "The", missing last',
+    () async {
+      await add(1, title: 'z', artist: 'Zebra');
+      await add(2, title: 'b', artist: 'the beatles');
+      await add(3, title: 'a', artist: 'Adele');
+      await add(4, title: 'n');
 
-    final result = await sorted(TrackSortField.artist);
+      final result = await sorted(TrackSortField.artist);
 
-    expect(result.map((t) => t.artist), ['Adele', 'the beatles', 'Zebra', null]);
-  });
+      expect(result.map((t) => t.artist), [
+        'Adele',
+        'the beatles',
+        'Zebra',
+        null,
+      ]);
+    },
+  );
 
   test('sorts by year with missing years last', () async {
     await add(1, title: 'a', year: 2010);
